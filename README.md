@@ -63,11 +63,22 @@ SnowLuma 主仓库每次发 tag 都会自动派发 workflow_dispatch 到本仓�
 
 ## 启动
 
+一键安装（在本仓库内执行，先看脚本再跑）：
+
+```bash
+./install.sh --mode docker --yes
+# 接入已有机器人网络（不改对方的 compose）：
+./install.sh --mode compose --network maim_bot --yes
+./install.sh --dry-run
+```
+
+不要把脚本从 URL 直接管道进 bash。下载、核对、再执行。
+
+或：
+
 ```bash
 ./scripts/run.sh
 ```
-
-或使用已发布镜像：
 
 ```bash
 docker compose up -d
