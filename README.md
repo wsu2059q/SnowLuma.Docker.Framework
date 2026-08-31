@@ -63,17 +63,24 @@ SnowLuma 主仓库每次发 tag 都会自动派发 workflow_dispatch 到本仓�
 
 ## 启动
 
-一键安装（在本仓库内执行，先看脚本再跑）：
+一键安装（不必克隆本仓库）：
 
 ```bash
-./install.sh                          # 交互选模式
-./install.sh --mode docker --yes
-./install.sh --mode compose --network maim_bot --yes
-./install.sh --mode host --yes        # 进阶，非官方
-./install.sh --dry-run --mode docker
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash
 ```
 
-脚本会探测发行版和出网、按国内源装 Docker CE（面板环境只复用已有 Docker）、拉镜像失败则换前缀重试、端口占用会说明。不要把脚本从 URL 直接管道进 bash。
+交互式会询问模式。已经想好的话把参数接到 `bash -s --` 后面：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --mode docker --yes
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --mode compose --network maim_bot --yes
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --mode host --yes
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --dry-run --mode docker
+```
+
+国内访问 raw.githubusercontent.com 不通时，把 URL 换成 `https://ghfast.top/https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh`。
+
+脚本会探测发行版和出网、按国内源装 Docker CE（面板环境只复用已有 Docker）、拉镜像失败则换前缀重试、端口占用会说明。仓库里也可以直接 `./install.sh`。
 
 或：
 

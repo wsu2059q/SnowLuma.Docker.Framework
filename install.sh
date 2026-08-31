@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # SnowLuma Linux installer — official, first-party.
-# Download this file, inspect it, verify checksums, then run it.
-# Do not pipe from a URL:  curl … | bash
+# Interactive (TTY) or flags. Safe to run from a one-liner without cloning.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATE_DIR="${SCRIPT_DIR}/templates"
+INSTALLER_REPO="${SNOWLUMA_INSTALLER_REPO:-SnowLuma/SnowLuma.Docker.Framework}"
+INSTALLER_REF="${SNOWLUMA_INSTALLER_REF:-main}"
+
+_src="${BASH_SOURCE[0]:-}"
+if [[ -n "${_src}" && -f "${_src}" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${_src}")" && pwd)"
+else
+  SCRIPT_DIR=""
+fi
+TEMPLATE_DIR=""
 
 MODE="${MODE:-}"
 INSTALL_DIR="${INSTALL_DIR:-}"
@@ -38,8 +45,16 @@ usage() {
   cat <<'EOF'
 SnowLuma Linux 安装器（官方）
 
-用法:
-  ./install.sh --mode docker|compose|host [选项]
+一条命令（交互会问模式；不克隆仓库）:
+  curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash
+
+带参数:
+  curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --mode docker --yes
+  curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --mode compose --network maim_bot --yes
+
+仓库里也可以:
+  ./install.sh
+  ./install.sh --mode docker --yes
 
 模式:
   docker    独立官方镜像（空机器 / 空 VPS）
@@ -47,6 +62,7 @@ SnowLuma Linux 安装器（官方）
   host      进阶：本机安装 QQ + SnowLuma，不用 Docker（非官方支持）
 
 选项:
+  --mode NAME        docker | compose | host（--yes 且未指定时默认 docker）
   --dir PATH         写入目录（docker/compose 默认 ~/snowluma，host 默认 /opt/snowluma）
   --network NAME     compose 模式要加入的外部网络（默认 maim_bot）
   --image REF        镜像（默认 motricseven7/snowluma:latest）
@@ -55,8 +71,6 @@ SnowLuma Linux 安装器（官方）
   --dry-run          只打印将要做的事
   --skip-probe       跳过出网探测
   -h, --help
-
-不要 curl … | bash。先下载本脚本、核对，再执行。
 EOF
 }
 
@@ -76,7 +90,12 @@ else
 fi
 
 have() { command -v "$1" >/dev/null 2>&1; }
-is_tty() { [[ -t 0 && -t 1 ]]; }
+prompt_src() {
+  if [[ -t 0 ]]; then printf '%s\n' /dev/stdin
+  elif [[ -c /dev/tty ]]; then printf '%s\n' /dev/tty
+  else printf '\n'
+  fi
+}
 
 log() { printf '%s\n' "$*"; }
 err() { printf '%s错误:%s %s\n' "${C_RED}" "${C_RESET}" "$*" >&2; }
@@ -100,30 +119,27 @@ EOF
 
 confirm() {
   local prompt="$1"
+  local src reply
   if [[ "${ASSUME_YES}" -eq 1 ]]; then return 0; fi
-  if have gum && is_tty; then gum confirm "${prompt}"; return; fi
-  if is_tty; then
-    printf '%s [y/N] ' "${prompt}"
-    read -r reply || true
-    [[ "${reply}" == [yY] || "${reply}" == yes || "${reply}" == 是 ]]
-    return
-  fi
-  die '非交互环境请加上 --yes'
+  src="$(prompt_src)"
+  [[ -n "${src}" ]] || die '非交互环境请加上 --yes'
+  if have gum && [[ -t 0 && -t 1 ]]; then gum confirm "${prompt}"; return; fi
+  printf '%s [y/N] ' "${prompt}"
+  read -r reply <"${src}" || true
+  [[ "${reply}" == [yY] || "${reply}" == yes || "${reply}" == 是 ]]
 }
 
 choose_from() {
   local header="$1"
   shift
   local items=("$@")
-  local i choice
-  if have gum && is_tty; then
+  local i choice src
+  if have gum && [[ -t 0 && -t 1 ]]; then
     gum choose --header "${header}" "${items[@]}"
     return
   fi
-  if ! is_tty; then
-    printf '%s\n' "${items[0]}"
-    return
-  fi
+  src="$(prompt_src)"
+  [[ -n "${src}" ]] || die '非交互环境请指定 --mode，并加上 --yes'
   log "${header}"
   i=1
   for it in "${items[@]}"; do
@@ -131,7 +147,7 @@ choose_from() {
     i=$((i + 1))
   done
   printf '选择 [1]: '
-  read -r choice || true
+  read -r choice <"${src}" || true
   if [[ -z "${choice}" ]]; then
     printf '%s\n' "${items[0]}"
     return
@@ -533,10 +549,15 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h|--help) usage; exit 0 ;;
+      --mode=*) MODE="${1#*=}"; shift ;;
       --mode) MODE="${2:-}"; shift 2 ;;
+      --dir=*) INSTALL_DIR="${1#*=}"; shift ;;
       --dir) INSTALL_DIR="${2:-}"; shift 2 ;;
+      --network=*) BOT_NETWORK="${1#*=}"; shift ;;
       --network) BOT_NETWORK="${2:-}"; shift 2 ;;
+      --image=*) IMAGE="${1#*=}"; shift ;;
       --image) IMAGE="${2:-}"; shift 2 ;;
+      --tag=*) SNOWLUMA_TAG="${1#*=}"; shift ;;
       --tag) SNOWLUMA_TAG="${2:-}"; shift 2 ;;
       --yes|-y) ASSUME_YES=1; shift ;;
       --dry-run) DRY_RUN=1; shift ;;
@@ -544,6 +565,143 @@ parse_args() {
       *) die "未知参数: $1" ;;
     esac
   done
+}
+
+fetch_template_file() {
+  local rel="$1" dest="$2"
+  mkdir -p "$(dirname "${dest}")"
+  download_to "${dest}" \
+    "https://cdn.jsdelivr.net/gh/${INSTALLER_REPO}@${INSTALLER_REF}/${rel}" \
+    "https://ghfast.top/https://raw.githubusercontent.com/${INSTALLER_REPO}/${INSTALLER_REF}/${rel}" \
+    "https://raw.githubusercontent.com/${INSTALLER_REPO}/${INSTALLER_REF}/${rel}" \
+    || die "下载模板失败: ${rel}"
+}
+
+emit_compose_standalone() {
+  cat <<'YAML'
+services:
+  snowluma:
+    image: ${SNOWLUMA_IMAGE:-motricseven7/snowluma:latest}
+    container_name: ${SNOWLUMA_CONTAINER:-snowluma}
+    restart: unless-stopped
+    shm_size: 1gb
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 1048576
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp=unconfined
+    environment:
+      VNC_PASSWD: ${VNC_PASSWD:-}
+      SNOWLUMA_ONEBOT_HOST: ${SNOWLUMA_ONEBOT_HOST:-0.0.0.0}
+      SNOWLUMA_UID: ${SNOWLUMA_UID:-1000}
+      SNOWLUMA_GID: ${SNOWLUMA_GID:-1000}
+      SNOWLUMA_WEBUI_HOST: ${SNOWLUMA_WEBUI_HOST:-0.0.0.0}
+      SNOWLUMA_WEBUI_PORT: ${SNOWLUMA_WEBUI_PORT:-5099}
+      SNOWLUMA_LOG_LEVEL: ${SNOWLUMA_LOG_LEVEL:-info}
+      SNOWLUMA_SCREEN: ${SNOWLUMA_SCREEN:-1920x1080x24}
+      SNOWLUMA_HOOK_AUTOLOAD: ${SNOWLUMA_HOOK_AUTOLOAD:-1}
+      SNOWLUMA_EXTRA_QQ_HOMES: "${SNOWLUMA_EXTRA_QQ_HOMES:-}"
+      SNOWLUMA_QQ_FLAGS: "${SNOWLUMA_QQ_FLAGS:---disable-gpu --disable-software-rasterizer --disable-gpu-compositing}"
+    ports:
+      - "${NOVNC_PORT:-6081}:6081"
+      - "${SNOWLUMA_WEBUI_HOST_PORT:-5099}:${SNOWLUMA_WEBUI_PORT:-5099}"
+      - "${ONEBOT_HTTP_PORT:-3000}:3000"
+      - "${ONEBOT_WS_PORT:-3001}:3001"
+    volumes:
+      - qq-gateway-data:/app/data
+      - qq-client-config:/app/.config
+      - qq-client-data:/app/.local/share
+
+volumes:
+  qq-gateway-data:
+    name: qq-gateway-data
+  qq-client-config:
+    name: qq-client-config
+  qq-client-data:
+    name: qq-client-data
+YAML
+}
+
+emit_compose_sidecar() {
+  cat <<'YAML'
+services:
+  snowluma:
+    image: ${SNOWLUMA_IMAGE:-motricseven7/snowluma:latest}
+    container_name: ${SNOWLUMA_CONTAINER:-snowluma}
+    restart: unless-stopped
+    shm_size: 1gb
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 1048576
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp=unconfined
+    environment:
+      VNC_PASSWD: ${VNC_PASSWD:-}
+      SNOWLUMA_ONEBOT_HOST: ${SNOWLUMA_ONEBOT_HOST:-0.0.0.0}
+      SNOWLUMA_UID: ${SNOWLUMA_UID:-1000}
+      SNOWLUMA_GID: ${SNOWLUMA_GID:-1000}
+      SNOWLUMA_WEBUI_HOST: ${SNOWLUMA_WEBUI_HOST:-0.0.0.0}
+      SNOWLUMA_WEBUI_PORT: ${SNOWLUMA_WEBUI_PORT:-5099}
+      SNOWLUMA_LOG_LEVEL: ${SNOWLUMA_LOG_LEVEL:-info}
+      SNOWLUMA_SCREEN: ${SNOWLUMA_SCREEN:-1920x1080x24}
+      SNOWLUMA_HOOK_AUTOLOAD: ${SNOWLUMA_HOOK_AUTOLOAD:-1}
+      SNOWLUMA_EXTRA_QQ_HOMES: "${SNOWLUMA_EXTRA_QQ_HOMES:-}"
+      SNOWLUMA_QQ_FLAGS: "${SNOWLUMA_QQ_FLAGS:---disable-gpu --disable-software-rasterizer --disable-gpu-compositing}"
+    ports:
+      - "${NOVNC_PORT:-6081}:6081"
+      - "${SNOWLUMA_WEBUI_HOST_PORT:-5099}:${SNOWLUMA_WEBUI_PORT:-5099}"
+      - "${ONEBOT_HTTP_PORT:-3000}:3000"
+      - "${ONEBOT_WS_PORT:-3001}:3001"
+    volumes:
+      - snowluma-gateway-data:/app/data
+      - snowluma-client-config:/app/.config
+      - snowluma-client-data:/app/.local/share
+    networks:
+      - botnet
+
+volumes:
+  snowluma-gateway-data:
+    name: ${SNOWLUMA_VOLUME_PREFIX:-snowluma}-gateway-data
+  snowluma-client-config:
+    name: ${SNOWLUMA_VOLUME_PREFIX:-snowluma}-client-config
+  snowluma-client-data:
+    name: ${SNOWLUMA_VOLUME_PREFIX:-snowluma}-client-data
+
+networks:
+  botnet:
+    external: true
+    name: ${SNOWLUMA_BOT_NETWORK:-maim_bot}
+YAML
+}
+
+ensure_templates() {
+  if [[ -n "${TEMPLATE_DIR}" && -d "${TEMPLATE_DIR}" ]]; then
+    return
+  fi
+  if [[ -n "${SCRIPT_DIR}" && -d "${SCRIPT_DIR}/templates" ]]; then
+    TEMPLATE_DIR="${SCRIPT_DIR}/templates"
+    return
+  fi
+  TEMPLATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/snowluma-templates.XXXXXX")"
+  case "${MODE}" in
+    compose) emit_compose_sidecar > "${TEMPLATE_DIR}/compose.sidecar.yml" ;;
+    docker) emit_compose_standalone > "${TEMPLATE_DIR}/compose.yml" ;;
+    host)
+      local f
+      mkdir -p "${TEMPLATE_DIR}/host"
+      note "host 模式从 ${INSTALLER_REF} 拉取 systemd 单元"
+      for f in snowluma.target snowluma-xvfb.service snowluma-wm.service \
+               snowluma-vnc.service snowluma-novnc.service snowluma-qq.service snowluma.service; do
+        fetch_template_file "templates/host/${f}" "${TEMPLATE_DIR}/host/${f}"
+      done
+      ;;
+  esac
 }
 
 # ── docker / compose write ──────────────────────────────────────
@@ -582,12 +740,13 @@ EOF
 write_stack() {
   local template dest_compose
   dest_compose="${INSTALL_DIR}/docker-compose.yml"
+  ensure_templates
   if [[ "${MODE}" == compose ]]; then
     template="${TEMPLATE_DIR}/compose.sidecar.yml"
   else
     template="${TEMPLATE_DIR}/compose.yml"
   fi
-  [[ -f "${template}" ]] || die "找不到模板 ${template}。请在 SnowLuma.Docker.Framework 仓库里运行安装器。"
+  [[ -f "${template}" ]] || die "找不到模板 ${template}。"
   step "写入 ${INSTALL_DIR}"
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     note "将复制 ${template}"
@@ -811,6 +970,7 @@ write_host_vnc_password() {
 }
 
 install_host_units() {
+  ensure_templates
   local unit_dir="${TEMPLATE_DIR}/host"
   [[ -d "${unit_dir}" ]] || die "找不到 ${unit_dir}"
   local novnc node_bin
@@ -868,6 +1028,10 @@ run_host() {
 
 parse_args "$@"
 banner
+if [[ -z "${MODE}" && "${ASSUME_YES}" -eq 1 ]]; then
+  MODE=docker
+  note '未指定 --mode，非交互默认 docker'
+fi
 choose_mode
 case "${MODE}" in
   docker|compose|host) ;;
