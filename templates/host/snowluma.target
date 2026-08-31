@@ -1,0 +1,4 @@
+[Unit]
+Description=SnowLuma host stack
+Wants=snowluma-xvfb.service snowluma-wm.service snowluma-vnc.service snowluma-novnc.service snowluma-qq.service snowluma.service
+After=network-online.target

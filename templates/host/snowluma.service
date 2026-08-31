@@ -1,0 +1,25 @@
+[Unit]
+Description=SnowLuma protocol service
+PartOf=snowluma.target
+After=snowluma-qq.service
+Requires=snowluma-qq.service
+
+[Service]
+Type=simple
+User=snowluma
+Group=snowluma
+WorkingDirectory=__DATA__
+Environment=DISPLAY=:1
+Environment=HOME=__QQ_HOME__
+Environment=SNOWLUMA_HOOK_AUTOLOAD=1
+Environment=SNOWLUMA_LOG_LEVEL=info
+AmbientCapabilities=CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_SYS_PTRACE
+NoNewPrivileges=false
+LimitNOFILE=65536
+ExecStart=__NODE_BIN__ __RUNTIME__/index.mjs
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=snowluma.target
