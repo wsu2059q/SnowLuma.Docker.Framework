@@ -11,11 +11,12 @@ SnowLuma 的 Linux Docker 运行框架，结构参考 `NapCat.Docker.Framework`�
 
 ## 端口
 
-- `5900`: VNC
-- `6081`: noVNC
+- `6081`: noVNC（浏览器远程桌面，扫码登录用）。首次启动会生成随机密码，只在日志里打印一次。
 - `5099`: SnowLuma WebUI
 - `3000`: OneBot HTTP 默认端口
 - `3001`: OneBot WebSocket 默认端口
+
+原生 VNC `5900` 默认不映射。需要时自行加 `-p 127.0.0.1:5900:5900`。
 
 ## 预编译产物
 
@@ -82,12 +83,10 @@ docker run -d \
   --ulimit nofile=65536:1048576 \
   --cap-add=SYS_PTRACE \
   --security-opt seccomp=unconfined \
-  -e VNC_PASSWD=vncpasswd \
   -e SNOWLUMA_WEBUI_HOST=0.0.0.0 \
   -e SNOWLUMA_WEBUI_PORT=5099 \
   -e SNOWLUMA_QQ_FLAGS="--disable-gpu --disable-software-rasterizer --disable-gpu-compositing" \
   -e TZ=Asia/Shanghai \
-  -p 5900:5900 \
   -p 6081:6081 \
   -p 5099:5099 \
   -p 3000:3000 \
@@ -130,7 +129,13 @@ docker logs snowluma 2>&1 | grep -E "临时密码|initial credentials" | tail -n
 docker logs snowluma 2>&1 | sed -nE 's/.*(临时密码: |initial credentials: user=admin password=)([^[:space:]]+).*/\2/p' | tail -n 1
 ```
 
-如果启动时自定义了容器名，请把命令里的 `snowluma` 替换成实际容器名。临时密码只会在全新的 `qq-gateway-data` 卷首次启动时输出一次；后续重启或复用旧卷时不会再生成新的明文密码。
+远程桌面密码（noVNC）：
+
+```bash
+docker logs snowluma 2>&1 | grep -E "远程桌面密码:|remote desktop password:" | tail -n 1
+```
+
+如果启动时自定义了容器名，请把命令里的 `snowluma` 替换成实际容器名。WebUI 临时密码只会在全新的 `qq-gateway-data` 卷首次启动时输出一次。远程桌面密码在首次生成或从旧默认值轮换时打印一次，之后存在数据卷里，重启不会换。
 
 noVNC 地址：
 
@@ -221,5 +226,7 @@ docker run -e SNOWLUMA_QQ_FLAGS="" ... motricseven7/snowluma:latest
 ## 注意
 
 部分新系统会把打开文件上限放到十亿级。官方 Compose 和 `scripts/run.sh` 会把它压到正常范围；镜像入口脚本也会在上限过大时自动下调，避免远程桌面卡住。自行 `docker run` 时请带上 `--ulimit nofile=65536:1048576`。
+
+不要再设置固定的远程桌面密码。留空则首次启动生成随机值；把 `VNC_PASSWD` 设成自己的值才会用你给的密码。不要把 noVNC 端口裸放到不信任的网络上。
 
 SnowLuma 当前使用 native addon 对 QQ 进程进行加载，容器启动时需要 `SYS_PTRACE` 能力和 `seccomp=unconfined`。镜像内会给 `/usr/local/bin/node` 设置 `cap_sys_ptrace`，因此正常情况下不需要再修改宿主机 `kernel.yama.ptrace_scope`。请遵守第三方软件的使用许可和开源协议。

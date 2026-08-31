@@ -14,7 +14,8 @@ if [ "${NOFILE_HARD}" = "unlimited" ] || [ "${NOFILE_HARD}" -gt 1048576 ] 2>/dev
   ulimit -Hn 1048576 || true
 fi
 
-: "${VNC_PASSWD:=vncpasswd}"
+: "${VNC_PASSWD:=}"
+: "${SNOWLUMA_ONEBOT_HOST:=0.0.0.0}"
 : "${SNOWLUMA_UID:=1000}"
 : "${SNOWLUMA_GID:=1000}"
 : "${SNOWLUMA_HOME:=/app/runtime}"
@@ -30,6 +31,7 @@ export DISPLAY="${DISPLAY:-:1}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-${SNOWLUMA_UID}}"
 export SNOWLUMA_HOOK_RUNTIME_DIR="${SNOWLUMA_HOOK_RUNTIME_DIR:-${XDG_RUNTIME_DIR}}"
 export SNOWLUMA_LOG_LEVEL SNOWLUMA_HOOK_AUTOLOAD SNOWLUMA_EXTRA_QQ_HOMES SNOWLUMA_QQ_FLAGS
+export SNOWLUMA_ONEBOT_HOST VNC_PASSWD
 
 DISPLAY_NUM="${DISPLAY#:}"
 DISPLAY_NUM="${DISPLAY_NUM%%.*}"
@@ -157,16 +159,21 @@ EOF
 generate_extra_qq_supervisor_conf
 
 node <<'NODE'
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
 const dataDir = process.env.SNOWLUMA_DATA || '/app/data';
 const configDir = path.join(dataDir, 'config');
 const runtimeConfigPath = path.join(configDir, 'runtime.json');
+const vncPasswordPath = path.join(configDir, 'vnc-password');
 const requestedPort = Number(process.env.SNOWLUMA_WEBUI_PORT || 5099);
 const webuiPort = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535
   ? requestedPort
   : 5099;
+const onebotHost = (process.env.SNOWLUMA_ONEBOT_HOST || '0.0.0.0').trim() || '0.0.0.0';
+const KNOWN_VNC_DEFAULT = 'vncpasswd';
+const LOOPBACK = new Set(['', '127.0.0.1', '::1', 'localhost']);
 
 fs.mkdirSync(configDir, { recursive: true });
 
@@ -185,12 +192,117 @@ if (typeof runtimeConfig.webuiHost !== 'string' || !runtimeConfig.webuiHost.trim
   runtimeConfig.webuiHost = '0.0.0.0';
 }
 fs.writeFileSync(runtimeConfigPath, `${JSON.stringify(runtimeConfig, null, 2)}\n`, 'utf8');
-NODE
-# Node.js block above ran as root, so runtime.json is owned by root.
-# SnowLuma runs as snowluma user and needs write access to config/.
-chown "${SNOWLUMA_UID}:${SNOWLUMA_GID}" "${SNOWLUMA_DATA}/config" "${SNOWLUMA_DATA}/config/runtime.json"
 
-x11vnc -storepasswd "${VNC_PASSWD}" /root/.vnc/passwd >/dev/null
+function isLoopbackHost(host) {
+  return LOOPBACK.has(String(host ?? '').trim().toLowerCase());
+}
+
+function newAccessToken() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+function seedOneBotFile(filePath) {
+  let cfg = {};
+  try {
+    cfg = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    cfg = {};
+  }
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) cfg = {};
+  if (!cfg.networks || typeof cfg.networks !== 'object' || Array.isArray(cfg.networks)) {
+    cfg.networks = {};
+  }
+  const nets = cfg.networks;
+
+  const ensureServers = (key, fallback) => {
+    if (!Array.isArray(nets[key]) || nets[key].length === 0) {
+      nets[key] = [fallback];
+      return;
+    }
+    for (const adapter of nets[key]) {
+      if (!adapter || typeof adapter !== 'object') continue;
+      if (isLoopbackHost(adapter.host)) adapter.host = onebotHost;
+    }
+  };
+
+  ensureServers('httpServers', {
+    name: 'http-default',
+    host: onebotHost,
+    port: 3000,
+    path: '/',
+    accessToken: newAccessToken(),
+    messageFormat: 'array',
+    reportSelfMessage: false,
+  });
+  ensureServers('wsServers', {
+    name: 'ws-default',
+    host: onebotHost,
+    port: 3001,
+    path: '/',
+    role: 'Universal',
+    accessToken: newAccessToken(),
+    messageFormat: 'array',
+    reportSelfMessage: false,
+  });
+  if (!Array.isArray(nets.httpClients)) nets.httpClients = [];
+  if (!Array.isArray(nets.wsClients)) nets.wsClients = [];
+
+  fs.writeFileSync(filePath, `${JSON.stringify(cfg, null, 2)}\n`, 'utf8');
+}
+
+seedOneBotFile(path.join(configDir, 'onebot.json'));
+for (const name of fs.readdirSync(configDir)) {
+  if (/^onebot_.+\.json$/i.test(name)) {
+    seedOneBotFile(path.join(configDir, name));
+  }
+}
+
+function isKnownVncPassword(value) {
+  return !value || value === KNOWN_VNC_DEFAULT;
+}
+
+let envPass = String(process.env.VNC_PASSWD || '').trim();
+let filePass = '';
+try {
+  filePass = fs.readFileSync(vncPasswordPath, 'utf8').trim();
+} catch {
+  filePass = '';
+}
+
+let vncPass;
+let announceVnc = false;
+if (!isKnownVncPassword(envPass)) {
+  vncPass = envPass;
+  announceVnc = isKnownVncPassword(filePass) || filePass !== vncPass;
+} else if (!isKnownVncPassword(filePass)) {
+  vncPass = filePass;
+} else {
+  vncPass = crypto.randomBytes(15).toString('base64url');
+  announceVnc = true;
+}
+
+fs.writeFileSync(vncPasswordPath, `${vncPass}\n`, { mode: 0o600 });
+fs.chmodSync(vncPasswordPath, 0o600);
+if (announceVnc) {
+  console.log(`远程桌面密码: ${vncPass}`);
+  console.log(`remote desktop password: ${vncPass}`);
+}
+NODE
+# Node.js block above ran as root, so application JSON is owned by root.
+# SnowLuma runs as snowluma and needs write access to its config files.
+# The remote-desktop password file stays root-only.
+chown "${SNOWLUMA_UID}:${SNOWLUMA_GID}" "${SNOWLUMA_DATA}/config" \
+  "${SNOWLUMA_DATA}/config/runtime.json" \
+  "${SNOWLUMA_DATA}/config/onebot.json"
+if ls "${SNOWLUMA_DATA}/config"/onebot_*.json >/dev/null 2>&1; then
+  chown "${SNOWLUMA_UID}:${SNOWLUMA_GID}" "${SNOWLUMA_DATA}/config"/onebot_*.json
+fi
+chown root:root "${SNOWLUMA_DATA}/config/vnc-password"
+chmod 600 "${SNOWLUMA_DATA}/config/vnc-password"
+
+VNC_STORE_PASS="$(tr -d '\n' < "${SNOWLUMA_DATA}/config/vnc-password")"
+x11vnc -storepasswd "${VNC_STORE_PASS}" /root/.vnc/passwd >/dev/null
+unset VNC_STORE_PASS
 
 wait_for_xvfb() {
   local socket="/tmp/.X11-unix/X${DISPLAY_NUM}"

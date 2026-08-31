@@ -34,7 +34,8 @@ docker run -d \
   --ulimit nofile=65536:1048576 \
   --cap-add=SYS_PTRACE \
   --security-opt seccomp=unconfined \
-  -e VNC_PASSWD="${VNC_PASSWD:-vncpasswd}" \
+  -e VNC_PASSWD="${VNC_PASSWD:-}" \
+  -e SNOWLUMA_ONEBOT_HOST="${SNOWLUMA_ONEBOT_HOST:-0.0.0.0}" \
   -e SNOWLUMA_UID="${SNOWLUMA_UID:-1000}" \
   -e SNOWLUMA_GID="${SNOWLUMA_GID:-1000}" \
   -e SNOWLUMA_WEBUI_HOST="${SNOWLUMA_WEBUI_HOST}" \
@@ -44,7 +45,6 @@ docker run -d \
   -e SNOWLUMA_HOOK_AUTOLOAD="${SNOWLUMA_HOOK_AUTOLOAD:-1}" \
   -e SNOWLUMA_EXTRA_QQ_HOMES="${SNOWLUMA_EXTRA_QQ_HOMES:-}" \
   -e SNOWLUMA_QQ_FLAGS="${SNOWLUMA_QQ_FLAGS:---disable-gpu --disable-software-rasterizer --disable-gpu-compositing}" \
-  -p "${VNC_PORT:-5900}:5900" \
   -p "${NOVNC_PORT:-6081}:6081" \
   -p "${SNOWLUMA_WEBUI_HOST_PORT}:${SNOWLUMA_WEBUI_PORT}" \
   -p "${ONEBOT_HTTP_PORT:-3000}:3000" \
