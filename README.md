@@ -61,6 +61,10 @@ SnowLuma 主仓库每次发 tag 都会自动派发 workflow_dispatch 到本仓�
 
 也可以在 Actions 页手动触发 `docker-publish` 工作流，对任意已发布的 SnowLuma tag 重打镜像。
 
+工作流的可选输入 `ghcr_image` 可设为 `ghcr.io/snowluma/snowluma`，将相同版本同时发布到 GHCR；留空时只发布到 Docker Hub。两处发布都遵循 `also_latest` 和 `sha_tag`：dev 构建应设置 `also_latest=false`，并提供 `dev-<commit>` 形式的 `sha_tag`，避免覆盖稳定版 `latest`。
+
+GHCR 使用工作流的 `GITHUB_TOKEN` 和 `packages: write` 权限，无需新增 registry token。首次发布后，需要在 GitHub 的 package 设置中将可见性改为 **Public**，普通用户才能匿名拉取。如果同名 package 已存在，应先授予本仓库的 Actions 写入权限。
+
 ## 启动
 
 一键安装（不必克隆本仓库）：
