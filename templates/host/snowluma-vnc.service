@@ -1,0 +1,19 @@
+[Unit]
+Description=SnowLuma remote desktop
+PartOf=snowluma.target
+After=snowluma-xvfb.service
+Requires=snowluma-xvfb.service
+
+[Service]
+Type=simple
+User=snowluma
+Group=snowluma
+Environment=DISPLAY=:1
+Environment=HOME=__QQ_HOME__
+ExecStart=/usr/bin/x11vnc -display :1 -forever -shared -rfbauth __VNC_AUTH__ -localhost
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+
+[Install]
+WantedBy=snowluma.target

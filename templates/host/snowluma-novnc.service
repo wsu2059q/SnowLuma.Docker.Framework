@@ -1,0 +1,16 @@
+[Unit]
+Description=SnowLuma browser remote desktop
+PartOf=snowluma.target
+After=snowluma-vnc.service
+Requires=snowluma-vnc.service
+
+[Service]
+Type=simple
+User=snowluma
+Group=snowluma
+ExecStart=__NOVNC_BIN__ --vnc localhost:5900 --listen 6081 --file-only
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=snowluma.target

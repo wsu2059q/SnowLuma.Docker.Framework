@@ -7,13 +7,16 @@ SnowLuma 的 Linux Docker 运行框架，结构参考 `NapCat.Docker.Framework`�
 - [x] Linux/Amd64
 - [x] Linux/Arm64
 
+镜像内置官方 Linux QQ 3.2.32。
+
 ## 端口
 
-- `5900`: VNC
-- `6081`: noVNC
+- `6081`: noVNC（浏览器远程桌面，扫码登录用）。首次启动会生成随机密码，只在日志里打印一次。
 - `5099`: SnowLuma WebUI
 - `3000`: OneBot HTTP 默认端口
 - `3001`: OneBot WebSocket 默认端口
+
+原生 VNC `5900` 默认不映射。需要时自行加 `-p 127.0.0.1:5900:5900`。
 
 ## 预编译产物
 
@@ -58,13 +61,36 @@ SnowLuma 主仓库每次发 tag 都会自动派发 workflow_dispatch 到本仓�
 
 也可以在 Actions 页手动触发 `docker-publish` 工作流，对任意已发布的 SnowLuma tag 重打镜像。
 
+工作流的可选输入 `ghcr_image` 可设为 `ghcr.io/snowluma/snowluma`，将相同版本同时发布到 GHCR；留空时只发布到 Docker Hub。两处发布都遵循 `also_latest` 和 `sha_tag`：dev 构建应设置 `also_latest=false`，并提供 `dev-<commit>` 形式的 `sha_tag`，避免覆盖稳定版 `latest`。
+
+GHCR 使用工作流的 `GITHUB_TOKEN` 和 `packages: write` 权限，无需新增 registry token。首次发布后，需要在 GitHub 的 package 设置中将可见性改为 **Public**，普通用户才能匿名拉取。如果同名 package 已存在，应先授予本仓库的 Actions 写入权限。
+
 ## 启动
+
+一键安装（不必克隆本仓库）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash
+```
+
+交互式会询问模式。已经想好的话把参数接到 `bash -s --` 后面：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --mode docker --yes
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --mode compose --network maim_bot --yes
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --mode host --yes
+curl -fsSL https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh | bash -s -- --dry-run --mode docker
+```
+
+国内访问 raw.githubusercontent.com 不通时，把 URL 换成 `https://ghfast.top/https://raw.githubusercontent.com/SnowLuma/SnowLuma.Docker.Framework/main/install.sh`。
+
+脚本会探测发行版和出网、按国内源装 Docker CE（面板环境只复用已有 Docker）、拉镜像失败则换前缀重试、端口占用会说明。仓库里也可以直接 `./install.sh`。
+
+或：
 
 ```bash
 ./scripts/run.sh
 ```
-
-或使用已发布镜像：
 
 ```bash
 docker compose up -d
@@ -77,18 +103,20 @@ docker run -d \
   --name snowluma \
   --restart unless-stopped \
   --shm-size=1g \
+  --ulimit nofile=65536:1048576 \
   --cap-add=SYS_PTRACE \
   --security-opt seccomp=unconfined \
-  -e VNC_PASSWD=vncpasswd \
+  -e SNOWLUMA_WEBUI_HOST=0.0.0.0 \
   -e SNOWLUMA_WEBUI_PORT=5099 \
-  -p 5900:5900 \
+  -e SNOWLUMA_QQ_FLAGS="--disable-gpu --disable-software-rasterizer --disable-gpu-compositing" \
+  -e TZ=Asia/Shanghai \
   -p 6081:6081 \
   -p 5099:5099 \
   -p 3000:3000 \
   -p 3001:3001 \
-  -v snowluma-data:/app/snowluma-data \
-  -v snowluma-qq-config:/app/.config \
-  -v snowluma-qq-data:/app/.local/share \
+  -v qq-gateway-data:/app/data \
+  -v qq-client-config:/app/.config \
+  -v qq-client-data:/app/.local/share \
   motricseven7/snowluma:latest
 ```
 
@@ -106,6 +134,12 @@ docker exec -it snowluma bash
 docker logs -f snowluma
 ```
 
+查看 supervisor 进程状态：
+
+```bash
+docker exec snowluma supervisorctl status
+```
+
 快速查找 SnowLuma WebUI 临时密码：
 
 ```bash
@@ -118,7 +152,13 @@ docker logs snowluma 2>&1 | grep -E "临时密码|initial credentials" | tail -n
 docker logs snowluma 2>&1 | sed -nE 's/.*(临时密码: |initial credentials: user=admin password=)([^[:space:]]+).*/\2/p' | tail -n 1
 ```
 
-如果启动时自定义了容器名，请把命令里的 `snowluma` 替换成实际容器名。临时密码只会在全新的 `snowluma-data` 卷首次启动时输出一次；后续重启或复用旧卷时不会再生成新的明文密码。
+远程桌面密码（noVNC）：
+
+```bash
+docker logs snowluma 2>&1 | grep -E "远程桌面密码:|remote desktop password:" | tail -n 1
+```
+
+如果启动时自定义了容器名，请把命令里的 `snowluma` 替换成实际容器名。WebUI 临时密码只会在全新的 `qq-gateway-data` 卷首次启动时输出一次。远程桌面密码在首次生成或从旧默认值轮换时打印一次，之后存在数据卷里，重启不会换。
 
 noVNC 地址：
 
@@ -132,7 +172,8 @@ SnowLuma WebUI 地址：
 http://IP:5099/
 ```
 
-SnowLuma 的配置和 OneBot 配置默认持久化在 `/app/snowluma-data/config`。
+SnowLuma 的配置和 OneBot 配置默认持久化在 `/app/data/config`。
+官方 Compose 和 `scripts/run.sh` 默认传入 `SNOWLUMA_WEBUI_HOST=0.0.0.0`，以便已发布的 `5099` 端口可访问。环境变量优先于 WebUI 中保存的地址；如需限制为容器本机或绑定其他地址，请显式修改该变量后重建容器。
 
 ## 自动注入
 
@@ -146,8 +187,69 @@ SnowLuma 的配置和 OneBot 配置默认持久化在 `/app/snowluma-data/config
 docker run -e SNOWLUMA_HOOK_AUTOLOAD=0 ... motricseven7/snowluma:latest
 ```
 
-或在 `docker-compose.yml` 里设 `SNOWLUMA_HOOK_AUTOLOAD: 0`，再或者在持久卷 `/app/snowluma-data/config/runtime.json` 里设 `"hookAutoLoad": false`。环境变量优先于 JSON 配置。
+或在 `docker-compose.yml` 里设 `SNOWLUMA_HOOK_AUTOLOAD: 0`，再或者在持久卷 `/app/data/config/runtime.json` 里设 `"hookAutoLoad": false`。环境变量优先于 JSON 配置。
+
+## 多开 QQ
+
+镜像支持通过独立 `HOME` 自动拉起多个 QQ 实例。设置 `SNOWLUMA_EXTRA_QQ_HOMES` 为逗号或空格分隔的 `/app/...` 容器路径，并给每个路径挂独立持久卷：
+
+```yaml
+services:
+  snowluma:
+    environment:
+      SNOWLUMA_EXTRA_QQ_HOMES: /app/qq-acct2,/app/qq-acct3
+    volumes:
+      - qq-gateway-data:/app/data
+      - qq-client-config:/app/.config
+      - qq-client-data:/app/.local/share
+      - qq-client-account-2:/app/qq-acct2
+      - qq-client-account-3:/app/qq-acct3
+
+volumes:
+  qq-gateway-data:
+    name: qq-gateway-data
+  qq-client-config:
+    name: qq-client-config
+  qq-client-data:
+    name: qq-client-data
+  qq-client-account-2:
+    name: qq-client-account-2
+  qq-client-account-3:
+    name: qq-client-account-3
+```
+
+容器启动时会为每个额外 `HOME` 生成一个 supervisor program，使用 `snowluma` 用户、同一个 `DISPLAY` 和同一组 `SNOWLUMA_QQ_FLAGS` 启动 QQ。这样 SnowLuma 进程和所有 QQ 进程同用户运行，hook 自动注入不会遇到手动 `docker exec` 误用 root 带来的权限问题。
+
+临时手动启动第二个账号也可以：
+
+```bash
+docker exec -u snowluma -e DISPLAY=:1 -e HOME=/app/qq-acct2 -d snowluma sh -lc 'qq --no-sandbox ${SNOWLUMA_QQ_FLAGS}'
+```
+
+注意每个 QQ 实例必须独占自己的 `HOME`，不要让两个实例共用 `/app` 或同一个 `/app/qq-acctN`。
+
+## GPU / 内存（SwiftShader 软件渲染泄漏）
+
+容器内没有硬件 GPU，QQ（基于 Electron）的 GPU 进程会退回 SwiftShader 软件渲染。长时间停在登录界面（未扫码登录）时，SwiftShader 会不断分配且不回收内存，导致进程内存单调上涨。镜像默认通过 `SNOWLUMA_QQ_FLAGS` 给 QQ 关掉 GPU 与 SwiftShader：
+
+```text
+SNOWLUMA_QQ_FLAGS="--disable-gpu --disable-software-rasterizer --disable-gpu-compositing"
+```
+
+此时改走纯 CPU 光栅（Skia），登录二维码照常渲染、可正常扫码，只是不再有软件 GL 那条漏内存的路径。
+
+如果你给容器做了 GPU 直通、想恢复硬件加速，把它清空或换成自己的参数：
+
+```bash
+docker run -e SNOWLUMA_QQ_FLAGS="" ... motricseven7/snowluma:latest
+```
+
+或在 `docker-compose.yml` 里设 `SNOWLUMA_QQ_FLAGS: ""`。
 
 ## 注意
 
-SnowLuma 当前使用 native addon 对 QQ 进程进行加载，容器启动时需要 `SYS_PTRACE` 能力和 `seccomp=unconfined`。请遵守第三方软件的使用许可和开源协议。
+部分新系统会把打开文件上限放到十亿级。官方 Compose 和 `scripts/run.sh` 会把它压到正常范围；镜像入口脚本也会在上限过大时自动下调，避免远程桌面卡住。自行 `docker run` 时请带上 `--ulimit nofile=65536:1048576`。
+
+不要再设置固定的远程桌面密码。留空则首次启动生成随机值；把 `VNC_PASSWD` 设成自己的值才会用你给的密码。不要把 noVNC 端口裸放到不信任的网络上。
+
+SnowLuma 当前使用 native addon 对 QQ 进程进行加载，容器启动时需要 `SYS_PTRACE` 能力和 `seccomp=unconfined`。镜像内会给 `/usr/local/bin/node` 设置 `cap_sys_ptrace`，因此正常情况下不需要再修改宿主机 `kernel.yama.ptrace_scope`。请遵守第三方软件的使用许可和开源协议。

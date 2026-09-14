@@ -1,0 +1,17 @@
+[Unit]
+Description=SnowLuma virtual display
+PartOf=snowluma.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=snowluma
+Group=snowluma
+Environment=DISPLAY=:1
+ExecStart=/usr/bin/Xvfb :1 -screen 0 1920x1080x24 -nolisten tcp
+Restart=always
+RestartSec=2
+LimitNOFILE=65536
+
+[Install]
+WantedBy=snowluma.target

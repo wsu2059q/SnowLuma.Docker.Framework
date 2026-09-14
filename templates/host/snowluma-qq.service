@@ -1,0 +1,19 @@
+[Unit]
+Description=SnowLuma QQ client
+PartOf=snowluma.target
+After=snowluma-wm.service
+Requires=snowluma-xvfb.service
+
+[Service]
+Type=simple
+User=snowluma
+Group=snowluma
+Environment=DISPLAY=:1
+Environment=HOME=__QQ_HOME__
+ExecStart=/opt/QQ/qq --no-sandbox --disable-gpu --disable-software-rasterizer --disable-gpu-compositing
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=snowluma.target

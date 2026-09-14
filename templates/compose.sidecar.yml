@@ -30,14 +30,21 @@ services:
       - "${ONEBOT_HTTP_PORT:-3000}:3000"
       - "${ONEBOT_WS_PORT:-3001}:3001"
     volumes:
-      - qq-gateway-data:/app/data
-      - qq-client-config:/app/.config
-      - qq-client-data:/app/.local/share
+      - snowluma-gateway-data:/app/data
+      - snowluma-client-config:/app/.config
+      - snowluma-client-data:/app/.local/share
+    networks:
+      - botnet
 
 volumes:
-  qq-gateway-data:
-    name: qq-gateway-data
-  qq-client-config:
-    name: qq-client-config
-  qq-client-data:
-    name: qq-client-data
+  snowluma-gateway-data:
+    name: ${SNOWLUMA_VOLUME_PREFIX:-snowluma}-gateway-data
+  snowluma-client-config:
+    name: ${SNOWLUMA_VOLUME_PREFIX:-snowluma}-client-config
+  snowluma-client-data:
+    name: ${SNOWLUMA_VOLUME_PREFIX:-snowluma}-client-data
+
+networks:
+  botnet:
+    external: true
+    name: ${SNOWLUMA_BOT_NETWORK:-maim_bot}
